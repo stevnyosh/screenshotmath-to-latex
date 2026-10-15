@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>LaTeX Code Converter</title>
+<style>
+:root{--bg:#faf9f6;--card:#fff;--tx:#1f1d1a;--mu:#6b665e;--bd:#e3dfd6;--ac:#2f5d50;--acx:#fff;--er:#b3261e;--code:#f3f1ea;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1b1a18;--card:#252320;--tx:#ece8df;--mu:#a29c90;--bd:#3a3732;--ac:#7fc2ae;--acx:#10231d;--er:#f2b8b5;--code:#1f1d1a}}
+:root[data-theme="dark"]{--bg:#1b1a18;--card:#252320;--tx:#ece8df;--mu:#a29c90;--bd:#3a3732;--ac:#7fc2ae;--acx:#10231d;--er:#f2b8b5;--code:#1f1d1a}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:760px;margin:0 auto;padding:20px 16px 48px}
+h1{font-size:1.5rem;margin:0 0 4px}
+p.sub{color:var(--mu);margin:0 0 20px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:16px;margin-bottom:16px}
+.drop{border:2px dashed var(--bd);border-radius:12px;padding:28px 12px;text-align:center;color:var(--mu);cursor:pointer}
+.drop.on{border-color:var(--ac);color:var(--tx)}
+.drop img{max-width:100%;max-height:280px;border-radius:8px}
+button{font:inherit;border:1px solid var(--bd);background:var(--card);color:var(--tx);border-radius:10px;padding:10px 16px;cursor:pointer}
+button.pri{background:var(--ac);color:var(--acx);border-color:var(--ac);font-weight:600}
+button:disabled{opacity:.5;cursor:not-allowed}
+.row{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:12px}
+textarea{width:100%;min-height:200px;font:14px/1.5 ui-monospace,Menlo,Consolas,monospace;background:var(--code);color:var(--tx);border:1px solid var(--bd);border-radius:10px;padding:12px;resize:vertical}
+h2{font-size:1rem;margin:0 0 10px}
+#prev{overflow-x:auto;padding:8px 0}
+#msg{color:var(--mu);margin-top:10px;min-height:1.4em}
+#msg.err{color:var(--er)}
+</style>
+</head>
+<body>
+<main>
+<h1>LaTeX Code Converter</h1>
+<p class="sub">Unggahlah screenshot rumus matematika. Hasilnya akan dirapikan dan mengikuti dari susunan gambar</p>
+
+<div class="card">
+  <div class="drop" id="drop" tabindex="0">
+    <div id="dropText">Klik, seret gambar ke sini, atau tempel (Ctrl+V) screenshot</div>
+    <img id="img" alt="" hidden>
+  </div>
+  <input type="file" id="file" accept="image/*" hidden>
+  <div class="row">
+    <button class="pri" id="go" disabled>Konversi ke LaTeX</button>
+    <button id="reset" disabled>Ganti gambar</button>
+  </div>
+  <div id="msg"></div>
+</div>
+
+<div class="card" id="out" hidden>
+  <h2>Kode LaTeX</h2>
+  <textarea id="code" spellcheck="false"></textarea>
+  <div class="row">
+    <button class="pri" id="copy">Salin kode</button>
+    <button id="dl">Unduh .tex</button>
+    <button id="rend">Perbarui pratinjau</button>
+  </div>
+</div>
+
+<div class="card" id="pv" hidden>
+  <h2>Pratinjau</h2>
+  <div id="prev"></div>
+</div>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.2.2/es5/tex-svg.min.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+let blob=null, sample=null, dl=null;
+
+const PROMPT=`Kamu adalah konverter gambar rumus matematika ke LaTeX.
+Lihat gambar terlampir, lalu tulis ulang SELURUH isinya sebagai kode LaTeX.
+Aturan:
+- Keluarkan HANYA kode LaTeX, tanpa penjelasan, tanpa pagar markdown (jangan pakai tiga backtick), tanpa $ atau $$.
+- Bungkus dengan \\begin{aligned} ... \\end{aligned}.
+- Salin persis seperti di gambar: urutan baris, angka, tanda, dan bentuk pecahan. Jangan menyederhanakan, menghitung ulang, atau memperbaiki kesalahan di gambar.
+- Setiap baris dipisah dengan \\\\ . Ratakan pada tanda sama dengan memakai &= (contoh: A &= ... lalu &= ...). Jika ada beberapa persamaan terpisah, ratakan pada tanda = masing-masing baris.
+- Pecahan pakai \\frac{pembilang}{penyebut}. Pecahan campuran ditulis seperti 2\\frac{1}{2}. Perkalian \\times, pembagian \\div, akar \\sqrt{}, pangkat ^{}, indeks _{}.
+- Jika ada teks biasa (misalnya "maka", "jadi") pakai \\text{...}.
+- Jika ada bagian yang tidak terbaca jelas, tulis tebakan terbaik dan tambahkan komentar LaTeX di baris itu, misalnya % tidak jelas.`;
+
+function setMsg(t,err){const m=$('msg');m.textContent=t||'';m.className=err?'err':''}
+function setImage(f){
+  if(!f||!f.type.startsWith('image/')){setMsg('File harus berupa gambar.',true);return}
+  blob=f;
+  const u=URL.createObjectURL(f);
+  $('img').src=u;$('img').hidden=false;$('dropText').hidden=true;
+  $('go').disabled=false;$('reset').disabled=false;setMsg('');
+}
+const drop=$('drop');
+drop.onclick=()=>$('file').click();
+drop.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();$('file').click()}};
+$('file').onchange=e=>setImage(e.target.files[0]);
+['dragover','dragenter'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('on')}));
+['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('on')}));
+drop.addEventListener('drop',e=>setImage(e.dataTransfer.files[0]));
+document.addEventListener('paste',e=>{
+  for(const it of (e.clipboardData&&e.clipboardData.items)||[]){
+    if(it.type.startsWith('image/')){setImage(it.getAsFile());break}
+  }
+});
+$('reset').onclick=()=>{blob=null;$('img').hidden=true;$('img').src='';$('dropText').hidden=false;$('go').disabled=true;$('reset').disabled=true;$('file').value='';setMsg('')};
+
+function clean(t){
+  t=(t||'').trim().replace(/^```[a-z]*\s*/i,'').replace(/```\s*$/,'').trim();
+  t=t.replace(/^\$\$\s*/,'').replace(/\s*\$\$$/,'').trim();
+  return t;
+}
+async function render(){
+  const c=$('code').value.trim();
+  if(!c)return;
+  $('pv').hidden=false;
+  const p=$('prev');
+  p.textContent='';
+  p.appendChild(document.createTextNode('$$'+c+'$$'));
+  try{
+    if(window.MathJax&&MathJax.typesetPromise){MathJax.typesetClear&&MathJax.typesetClear([p]);await MathJax.typesetPromise([p])}
+    else p.textContent='Pratinjau belum tersedia (MathJax gagal dimuat).';
+  }catch(e){p.textContent='Pratinjau gagal: kode mungkin mengandung kesalahan sintaks.'}
+}
+
+$('go').onclick=async()=>{
+  if(!sample){setMsg('Fitur konversi Claude tidak tersedia di tampilan ini.',true);return}
+  $('go').disabled=true;setMsg('Membaca gambar…');
+  try{
+    const lim=await sample.limits();
+    if(!lim.images){setMsg('Input gambar belum didukung di tampilan ini.',true);$('go').disabled=false;return}
+    const r=await sample(PROMPT,{images:[blob],modelTier:'complex',cache:false,onText:({text})=>{$('out').hidden=false;$('code').value=clean(text)}});
+    $('code').value=clean(r.text);$('out').hidden=false;
+    setMsg('Selesai. Periksa hasilnya dengan pratinjau.');
+    await render();
+  }catch(e){
+    if(e&&e.code==='not_granted')setMsg('Izin ditolak. Izinkan akses agar konversi bisa berjalan.',true);
+    else if(e&&e.code==='rate_limited')setMsg('Terlalu banyak permintaan. Coba lagi sebentar lagi.',true);
+    else setMsg('Konversi gagal: '+((e&&e.message)||'kesalahan tidak diketahui'),true);
+  }
+  $('go').disabled=false;
+};
+$('copy').onclick=async()=>{
+  try{await navigator.clipboard.writeText($('code').value);setMsg('Kode disalin.')}
+  catch(e){$('code').select();setMsg('Tekan Ctrl+C untuk menyalin.')}
+};
+$('rend').onclick=render;
+$('dl').onclick=async()=>{
+  if(!dl){setMsg('Unduhan tidak tersedia di tampilan ini. Gunakan tombol Salin.',true);return}
+  try{await dl.save({filename:'rumus.tex',data:$('code').value})}catch(e){setMsg('Unduhan dibatalkan.')}
+};
+
+(async()=>{
+  try{sample=await claude.use('sample')}catch(e){sample=null}
+  try{dl=await claude.use('downloads')}catch(e){dl=null}
+  if(!sample)setMsg('Konversi memerlukan akses Claude; buka halaman ini dari claude.ai.',true);
+  if(!dl)$('dl').hidden=true;
+})();
+</script>
+</body>
+</html>
